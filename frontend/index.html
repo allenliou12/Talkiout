@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Anon Chat</title>
+</head>
+
+<body>
+    <h1>Anonymous Chat</h1>
+    <div id="status">
+        <button id="startBtn" onclick="startChat()">Start Chat</button>
+    </div>
+    <div id="chat" style="display:none;">
+        <div id="typing" style="font-style: italic; color: gray;"></div>
+        <div id="messages"></div>
+        <input id="input" placeholder="Type..." />
+        <button onclick="sendMessage()">Send</button>
+        <button onclick="leaveChat()">Leave Chat</button>
+    </div>
+
+
+    <script src="http://localhost:3000/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io("http://localhost:3000", { autoConnect: false });
+
+        let roomId = null;
+        let chatting = false;
+        let nickname = null;
+        let partnerName = null;
+
+        // Initially disable chat UI
+        document.getElementById("chat").style.display = "none";
+
+        function startChat() {
+            document.getElementById("status").innerText = "Waiting for a stranger...";
+            if (!socket.connected) socket.connect();
+            socket.emit("start-chat");  // 👈 now this will trigger pairing
+        }
+
+        socket.on("waiting", () => {
+            document.getElementById("status").innerText = "Waiting for a stranger...";
+        });
+
+        socket.on("matched", (data) => {
+            roomId = data.roomId;
+            nickname = data.nicknames[socket.id];
+            partnerName = Object.values(data.nicknames).find(n => n !== nickname);
+
+            document.getElementById("status").style.display = "none";
+            document.getElementById("chat").style.display = "block";
+        });
+
+        const input = document.getElementById("input");
+        let typingTimeout;
+
+        input.addEventListener("input", () => {
+            socket.emit("typing", roomId);
+            clearTimeout(typingTimeout);
+            typingTimeout = setTimeout(() => {
+                socket.emit("stop-typing", roomId);
+            }, 1000);
+        });
+
+        socket.on("typing", () => {
+            document.getElementById("typing").innerText = `${partnerName} is typing...`;
+        });
+
+        socket.on("stop-typing", () => {
+            document.getElementById("typing").innerText = "";
+        });
+
+        socket.on("message", (msg) => {
+            const msgDiv = document.createElement("div");
+            msgDiv.innerText = `${partnerName}: ${msg}`;
+            document.getElementById("messages").appendChild(msgDiv);
+        });
+
+        socket.on("stranger-left", () => {
+            endChat("Stranger has left the chat.");
+        });
+
+        function sendMessage() {
+            const input = document.getElementById("input");
+            const msg = input.value;
+            socket.emit("message", { roomId, message: msg });
+
+            const msgDiv = document.createElement("div");
+            msgDiv.innerText = `${nickname}: ${msg}`;
+            document.getElementById("messages").appendChild(msgDiv);
+            input.value = "";
+        }
+
+        function leaveChat() {
+            socket.emit("leave-room", roomId);
+            endChat("You left the chat.");
+        }
+
+        function endChat(message) {
+            chatting = false;
+            roomId = null;
+            document.getElementById("chat").style.display = "none";
+            document.getElementById("status").style.display = "block";
+            document.getElementById("status").innerHTML = `
+        <p>${message}</p>
+        <button onclick="startChat()">Start New Chat</button>
+    `;
+            document.getElementById("messages").innerHTML = ""; // clear chat history
+        }
+
+    </script>
+</body>
+
+</html>
