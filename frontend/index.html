@@ -1,23 +1,30 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
+    <meta charset="UTF-8">
     <title>Anon Chat</title>
 </head>
 
 <body>
     <h1>Anonymous Chat</h1>
+
     <div id="status">
+        <p id="statusMessage"></p>
         <button id="startBtn" onclick="startChat()">Start Chat</button>
     </div>
-    <div id="chat" style="display:none;">
-        <div id="typing" style="font-style: italic; color: gray;"></div>
-        <div id="messages"></div>
-        <input id="input" placeholder="Type..." />
-        <button onclick="sendMessage()">Send</button>
-        <button onclick="leaveChat()">Leave Chat</button>
+
+    <div id="cooldownNotice" style="display:none; color:red; margin-bottom: 10px;">
+        You're on cooldown. Please wait <span id="cooldownTimer"></span> seconds...
     </div>
 
+    <div id="chat" style="display:none;">
+        <div id="typing" style="font-style: italic; color: gray;"></div>
+        <div id="messages" style="overflow-y: auto; max-height: 300px; border: 1px solid #ccc; padding: 8px;"></div>
+        <input id="input" placeholder="Type..." />
+        <button id="sendButton" onclick="sendMessage()">Send</button>
+        <button onclick="leaveChat()">Leave Chat</button>
+    </div>
 
     <script src="http://localhost:3000/socket.io/socket.io.js"></script>
     <script>
@@ -28,17 +35,24 @@
         let nickname = null;
         let partnerName = null;
 
-        // Initially disable chat UI
-        document.getElementById("chat").style.display = "none";
+        const input = document.getElementById("input");
+        const sendButton = document.getElementById("sendButton");
+        let typingTimeout;
 
         function startChat() {
-            document.getElementById("status").innerText = "Waiting for a stranger...";
+            const startBtn = document.getElementById("startBtn");
+            const statusMsg = document.getElementById("statusMessage");
+
+            startBtn.disabled = true;
+            startBtn.style.display = "none";
+
+            statusMsg.innerText = "Waiting for a stranger...";
             if (!socket.connected) socket.connect();
-            socket.emit("start-chat");  // 👈 now this will trigger pairing
+            socket.emit("start-chat");
         }
 
         socket.on("waiting", () => {
-            document.getElementById("status").innerText = "Waiting for a stranger...";
+            document.getElementById("statusMessage").innerText = "Waiting for a stranger...";
         });
 
         socket.on("matched", (data) => {
@@ -46,12 +60,38 @@
             nickname = data.nicknames[socket.id];
             partnerName = Object.values(data.nicknames).find(n => n !== nickname);
 
+            input.focus();
             document.getElementById("status").style.display = "none";
             document.getElementById("chat").style.display = "block";
         });
 
-        const input = document.getElementById("input");
-        let typingTimeout;
+        // Cooldown handling
+        socket.on("chat-paused", (seconds) => {
+            const notice = document.getElementById("cooldownNotice");
+            const timer = document.getElementById("cooldownTimer");
+            const startBtn = document.getElementById("startBtn");
+
+            let remaining = seconds;
+            notice.style.display = "block";
+            timer.textContent = remaining;
+
+            input.disabled = true;
+            sendButton.disabled = true;
+            startBtn.disabled = true;
+
+            const interval = setInterval(() => {
+                remaining--;
+                timer.textContent = remaining;
+                if (remaining <= 0) {
+                    clearInterval(interval);
+                    notice.style.display = "none";
+                    input.disabled = false;
+                    sendButton.disabled = false;
+                    startBtn.disabled = false;
+                    startBtn.style.display = "inline-block";
+                }
+            }, 1000);
+        });
 
         input.addEventListener("input", () => {
             socket.emit("typing", roomId);
@@ -69,10 +109,23 @@
             document.getElementById("typing").innerText = "";
         });
 
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
         socket.on("message", (msg) => {
-            const msgDiv = document.createElement("div");
-            msgDiv.innerText = `${partnerName}: ${msg}`;
-            document.getElementById("messages").appendChild(msgDiv);
+            appendMessage(`${partnerName}: ${msg}`);
+        });
+
+        socket.on("idle-timeout", () => {
+            alert("You were disconnected due to inactivity.");
+        });
+
+        socket.on("spam-warning", (msg) => {
+            alert(msg);
         });
 
         socket.on("stranger-left", () => {
@@ -80,14 +133,23 @@
         });
 
         function sendMessage() {
-            const input = document.getElementById("input");
-            const msg = input.value;
-            socket.emit("message", { roomId, message: msg });
+            const msg = input.value.trim();
+            if (!msg) return;
 
-            const msgDiv = document.createElement("div");
-            msgDiv.innerText = `${nickname}: ${msg}`;
-            document.getElementById("messages").appendChild(msgDiv);
+            socket.emit("message", { roomId, message: msg });
+            appendMessage(`${nickname}: ${msg}`);
             input.value = "";
+        }
+
+        function appendMessage(text) {
+            const msgDiv = document.createElement("div");
+            const now = new Date();
+            const timestamp = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            msgDiv.innerText = `[${timestamp}] ${text}`;
+
+            const container = document.getElementById("messages");
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
         }
 
         function leaveChat() {
@@ -98,15 +160,22 @@
         function endChat(message) {
             chatting = false;
             roomId = null;
-            document.getElementById("chat").style.display = "none";
-            document.getElementById("status").style.display = "block";
-            document.getElementById("status").innerHTML = `
-        <p>${message}</p>
-        <button onclick="startChat()">Start New Chat</button>
-    `;
-            document.getElementById("messages").innerHTML = ""; // clear chat history
-        }
 
+            document.getElementById("chat").style.display = "none";
+
+            const statusDiv = document.getElementById("status");
+            const statusMsg = document.getElementById("statusMessage");
+            const startBtn = document.getElementById("startBtn");
+
+            statusDiv.style.display = "block";
+            statusMsg.innerText = message;
+
+            startBtn.disabled = false;
+            startBtn.style.display = "inline-block";
+
+            document.getElementById("messages").innerHTML = "";
+            document.getElementById("typing").innerText = "";
+        }
     </script>
 </body>
 
