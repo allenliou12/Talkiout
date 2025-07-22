@@ -1,10 +1,13 @@
-let waitingUser = null;
+const waitingQueue = [];
 const { cooldownTimers } = require("./chat_state");
 
 function handleMatchmaking(io, socket) {
     socket.on("start-chat", () => {
         const cooldownUntil = cooldownTimers[socket.id];
-
+        if (waitingQueue.find(s => s.id === socket.id)) {
+            console.log(`[SKIP] ${socket.id} is already in queue`);
+            return;
+        }
         //  Clear expired cooldown
         if (cooldownUntil && cooldownUntil <= Date.now()) {
             delete cooldownTimers[socket.id];
@@ -24,41 +27,46 @@ function handleMatchmaking(io, socket) {
             return;
         }
 
-        if (waitingUser) {
-            const roomId = `room-${waitingUser.id}-${socket.id}`;
+        if (waitingQueue.length > 0) {
+            const partner = waitingQueue.shift(); // Get the earliest waiting user
+        
+            const roomId = `room-${partner.id}-${socket.id}`;
             socket.join(roomId);
-            waitingUser.join(roomId);
-
+            partner.join(roomId);
+        
             const nicknames = {
-                [waitingUser.id]: "Stranger A",
+                [partner.id]: "Stranger A",
                 [socket.id]: "Stranger B"
             };
-
+        
             io.to(roomId).emit("matched", { roomId, nicknames });
-            console.log(`[MATCH] ${waitingUser.id} ↔ ${socket.id} in ${roomId}`);
-            waitingUser = null;
+            console.log(`[MATCH] ${partner.id} ↔ ${socket.id} in ${roomId}`);
         } else {
-            waitingUser = socket;
+            waitingQueue.push(socket);
             socket.emit("waiting");
             console.log(`[QUEUE] ${socket.id} is waiting`);
         }
+
     });
 
     // 🔌 Handle disconnect: clear waitingUser if they disconnect
     socket.on("disconnect", () => {
-        if (waitingUser && waitingUser.id === socket.id) {
-            waitingUser = null;
-            console.log(`[DISCONNECT] ${socket.id} was waiting and disconnected`);
+        const index = waitingQueue.findIndex(s => s.id === socket.id);
+        if (index !== -1) {
+            waitingQueue.splice(index, 1);
+            console.log(`[DISCONNECT] ${socket.id} removed from queue`);
         }
     });
 
     // ✋ Optional: allow user to manually cancel matchmaking
     socket.on("cancel-search", () => {
-        if (waitingUser && waitingUser.id === socket.id) {
-            waitingUser = null;
+        const index = waitingQueue.findIndex(s => s.id === socket.id);
+        if (index !== -1) {
+            waitingQueue.splice(index, 1);
             console.log(`[CANCEL] ${socket.id} cancelled search`);
         }
     });
+
 }
 
 module.exports = handleMatchmaking;
