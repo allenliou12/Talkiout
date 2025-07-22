@@ -20,15 +20,9 @@ function handleMatchmaking(io, socket) {
             console.log(`[BLOCKED] ${socket.id} is on cooldown for ${waitTime}s`);
             return;
         }
-
-        // 👤 Avoid matching the same user with themselves
-        if (waitingUser && waitingUser.id === socket.id) {
-            console.log(`[SKIP] ${socket.id} is already waiting`);
-            return;
-        }
-
+        //Try to match
         if (waitingQueue.length > 0) {
-            const partner = waitingQueue.shift(); // Get the earliest waiting user
+            const partner = waitingQueue.shift(); // FIFO
         
             const roomId = `room-${partner.id}-${socket.id}`;
             socket.join(roomId);
